@@ -15,17 +15,18 @@ st.markdown("""
         position: relative;
         width: 100%;
         height: 450px;
+        margin-top: 10px;
     }
     .floating-pin {
         position: absolute;
         top: 50%;
         left: 50%;
-        /* Ajuste fino para que la punta de la chincheta sea el centro exacto */
+        /* El secreto: -50% horizontal y -100% vertical para que la PUNTA sea el centro */
         transform: translate(-50%, -100%); 
         z-index: 9999;
         pointer-events: none;
-        font-size: 45px;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        font-size: 50px;
+        filter: drop-shadow(2px 4px 3px rgba(0,0,0,0.5));
     }
     div.stButton > button {
         background-color: #2e7d32; color: white; border-radius: 12px;
@@ -33,7 +34,8 @@ st.markdown("""
     }
     .stButton button[kind="primary"] {
         background-color: #d35400 !important;
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        box-shadow: 0 4px 15px rgba(211, 84, 0, 0.3);
+        margin-top: 15px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -77,38 +79,37 @@ elif menu == "📜 Listado":
 
 elif menu == "➕ Añadir Nuevo":
     if st.session_state.temp_coords is None:
-        st.markdown("#### 📍 Paso 1: Sitúa el bar bajo la chincheta")
+        st.markdown("#### 📍 Sitúa el bar bajo la chincheta")
         
-        # Envoltorio para la chincheta flotante
+        # Envoltorio visual para que la chincheta no flote en el aire
         st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
         st.markdown('<div class="floating-pin">📍</div>', unsafe_allow_html=True)
         
+        # Mapa centrado en San Vicente
         m_sel = folium.Map(location=[43.2960, -2.9975], zoom_start=19, tiles=None)
         folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                          attr='Google', name='Satélite').add_to(m_sel)
         
-        # Captura del centro del mapa
-        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_chincheta_v2")
+        # Captura del centro del mapa en tiempo real
+        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_chincheta_ajustada")
         st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.write(" ") # Espaciador
         
         if salida_sel and salida_sel.get("center"):
             c_lat = salida_sel["center"]["lat"]
             c_lng = salida_sel["center"]["lng"]
             
-            # Botón de confirmación
+            # Botón naranja destacado
             if st.button("🎯 Seleccionar este Bar", type="primary"):
                 st.session_state.temp_coords = (c_lat, c_lng)
                 st.rerun()
     else:
-        # PANTALLA DE FORMULARIO LIMPIA
-        st.subheader("📝 Paso 2: Datos del Establecimiento")
+        # PANTALLA DE FORMULARIO INDEPENDIENTE
+        st.subheader("📝 Registro del Nuevo Bar")
         with st.form("registro_final"):
             nombre = st.text_input("Nombre del Bar")
             marca = st.text_input("Marca de Sidra")
-            formato = st.radio("¿Formato de servicio?", ["Vaso (Pote)", "Solo Botella entera"])
-            obs = st.text_area("Notas adicionales")
+            formato = st.radio("¿Cómo se sirve?", ["Vaso (Pote)", "Solo Botella entera"])
+            obs = st.text_area("Notas / Observaciones")
             
             c_f1, c_f2 = st.columns(2)
             if c_f1.form_submit_button("✅ Registrar Bar"):
@@ -127,7 +128,7 @@ elif menu == "➕ Añadir Nuevo":
                     st.balloons()
                     st.rerun()
                 else:
-                    st.error("El nombre es obligatorio")
+                    st.error("Por favor, introduce el nombre del bar.")
             
             if c_f2.form_submit_button("❌ Cancelar"):
                 st.session_state.temp_coords = None
