@@ -8,37 +8,33 @@ from streamlit_folium import st_folium
 # 1. CONFIGURACIÓN
 st.set_page_config(page_title="Ruta Sidrera", layout="wide", page_icon="🍎")
 
-# Estilos visuales para botones y cursor
 st.markdown("""
     <style>
-    div.stButton > button {
-        background-color: #2e7d32; color: white; border-radius: 12px;
-        height: 3.5em; width: 100%; font-weight: bold; border: none;
-    }
+    div.stButton > button { background-color: #2e7d32; color: white; border-radius: 12px; height: 3.5em; width: 100%; font-weight: bold; }
     .stButton button[kind="primary"] { background-color: #d35400 !important; }
     .leaflet-container { cursor: crosshair !important; }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. CONEXIÓN SEGURA Y CARGA
+# 2. CONEXIÓN SEGURA
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
     
-    # Nombre exacto de tu hoja
-    NOMBRE_HOJA = "Ruta de sidreria colaborativa"
-    
-    # Intentamos leer la hoja
-    df_raw = conn.read(worksheet=NOMBRE_HOJA, ttl="0")
+    # Intentamos leer la primera hoja disponible para evitar fallos de nombre
+    df_raw = conn.read(ttl="0") 
     df_mapa = df_raw.copy()
     
+    # Nombre de la hoja para cuando vayamos a guardar (asegúrate de que coincida en Excel)
+    NOMBRE_HOJA = "Ruta de sidreria colaborativa"
+    
 except Exception as e:
-    st.error("⚠️ Error de conexión.")
-    st.write(f"Detalle técnico: {e}")
-    st.info("Asegúrate de que en 'Secrets' la URL sea correcta y que la hoja se llame exactamente: " + NOMBRE_HOJA)
+    st.error("⚠️ Error al conectar con Google Sheets.")
+    st.info("Revisa que en 'Secrets' la URL sea correcta y no tenga espacios al final.")
     st.stop()
 
 # Limpieza de datos
 if not df_mapa.empty:
+    # Convertimos coordenadas y quitamos filas vacías
     df_mapa['LAT'] = pd.to_numeric(df_mapa['LAT'].astype(str).str.replace(',', '.'), errors='coerce')
     df_mapa['LON'] = pd.to_numeric(df_mapa['LON'].astype(str).str.replace(',', '.'), errors='coerce')
     df_mapa = df_mapa.dropna(subset=['LAT', 'LON'])
@@ -59,14 +55,14 @@ if menu == "🗺️ Ver Mapa":
         color = "green" if "Botella" in str(row['Formato']) else "blue"
         folium.Marker(
             [row['LAT'], row['LON']], 
-            popup=f"<b>{row['Nombre']}</b>", 
+            popup=str(row['Nombre']), 
             icon=folium.Icon(color=color, icon="glass-whiskey", prefix="fa")
         ).add_to(m)
     
     st_folium(m, width="100%", height=550, key="mapa_v1")
 
 elif menu == "📜 Listado":
-    st.subheader("Historial")
+    st.subheader("Bares Registrados")
     st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato', 'Fecha_registro']], use_container_width=True, hide_index=True)
 
 elif menu == "➕ Añadir Nuevo":
@@ -83,24 +79,30 @@ elif menu == "➕ Añadir Nuevo":
     else:
         st.subheader("📝 Paso 2: Datos del bar")
         with st.form("registro"):
-            nombre = st.text_input("Nombre")
-            marca = st.text_input("Marca")
+            nombre = st.text_input("Nombre del Bar")
+            marca = st.text_input("Marca de sidra")
             formato = st.radio("Formato", ["Vaso (Pote)", "Botella entera"])
-            obs = st.text_area("Notas")
             
             if st.form_submit_button("✅ Guardar"):
                 if nombre:
-                    nueva = pd.DataFrame([{"Nombre": str(nombre), "LAT": float(st.session_state.temp_coords[0]), "LON": float(st.session_state.temp_coords[1]), "Marca": str(marca), "Formato": str(formato), "Fecha_registro": datetime.now().strftime("%d/%m/%Y"), "Observaciones": str(obs)}])
+                    nueva = pd.DataFrame([{
+                        "Nombre": str(nombre), 
+                        "LAT": float(st.session_state.temp_coords[0]), 
+                        "LON": float(st.session_state.temp_coords[1]), 
+                        "Marca": str(marca), 
+                        "Formato": str(formato), 
+                        "Fecha_registro": datetime.now().strftime("%d/%m/%Y")
+                    }])
                     df_final = pd.concat([df_raw, nueva], ignore_index=True)
                     
-                    # Guardamos usando el nombre de hoja confirmado
+                    # Intentamos guardar en la hoja especificada
                     conn.update(worksheet=NOMBRE_HOJA, data=df_final)
                     
                     st.session_state.temp_coords = None
                     st.balloons()
                     st.rerun()
                 else:
-                    st.error("Falta el nombre")
+                    st.error("El nombre es obligatorio")
             
             if st.form_submit_button("❌ Cancelar"):
                 st.session_state.temp_coords = None
