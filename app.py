@@ -6,10 +6,11 @@ import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 
-# 1. CONFIGURACIÓN Y CONEXIÓN
+# Configuración inicial
 st.set_page_config(page_title="Ruta Sidrera Barakaldo", layout="wide", page_icon="🍎")
 st.title("🍎 Nuestra Ruta de la Sidra")
 
+# 1. CONEXIÓN A GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
 df_raw = conn.read(ttl="0")
 
@@ -18,97 +19,97 @@ df['LAT'] = pd.to_numeric(df['LAT'].astype(str).str.replace(',', '.'), errors='c
 df['LON'] = pd.to_numeric(df['LON'].astype(str).str.replace(',', '.'), errors='coerce')
 df_mapa = df.dropna(subset=['LAT', 'LON'])
 
-# 2. FUNCIÓN DE AUTOCOMPLETADO (GEOPY)
-def obtener_nombre_punto(lat, lon):
+# 2. FUNCIÓN PARA ADIVINAR EL NOMBRE (Con "escudo" para evitar errores)
+def obtener_nombre_google(lat, lon):
     try:
-        geolocator = Nominatim(user_agent="sidra_app_barakaldo")
+        geolocator = Nominatim(user_agent="sidra_app_v2")
         location = geolocator.reverse((lat, lon), timeout=3)
         if location:
             address = location.raw.get('address', {})
-            # Prioridad: Nombre del local > Calle y número
+            # Buscamos el nombre del local o la calle
             return address.get('amenity') or address.get('shop') or f"{address.get('road', '')} {address.get('house_number', '')}".strip()
     except:
         return ""
     return ""
 
-# 3. LÓGICA DE ICONOS (VASO DE SIDRA Y BOTELLA)
+# 3. ICONOS (VASO SIDRA VS BOTELLA)
 def obtener_icono(formato_texto):
     formato_texto = str(formato_texto)
     if "Botella" in formato_texto and "Vasos" not in formato_texto:
         return folium.Icon(color="green", icon="wine-bottle", prefix="fa", icon_color="white")
     else:
-        # Usamos glass-whiskey que es el vaso de sidra más limpio
+        # Icono de vaso ancho y limpio
         return folium.Icon(color="blue", icon="glass-whiskey", prefix="fa", icon_color="white")
 
-# 4. MAPA
+# 4. MAPA SATÉLITE
 centro = [43.2960, -2.9975]
 m = folium.Map(location=centro, zoom_start=18, tiles=None)
 folium.TileLayer(
     tiles = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    attr = 'Google Maps',
+    attr = 'Google',
     max_zoom = 20,
     control = False
 ).add_to(m)
 
-# 5. DIBUJAR PUNTOS EXISTENTES (CON FECHA)
+# 5. DIBUJAR MARCADORES EXISTENTES (Con Fecha)
 for i, row in df_mapa.iterrows():
     fecha = row.get('Fecha_registro', '---')
     popup_text = f"""
-    <div style='font-family: sans-serif;'>
-        <b>{row['Nombre']}</b><br>
-        Sidra: {row['Marca']}<br>
-        Formato: {row['Formato']}<br>
-        <small style='color:gray'>Registrado: {fecha}</small>
+    <div style='font-family: sans-serif; min-width: 140px;'>
+        <h4 style='margin:0; color:#d35400;'>{row['Nombre']}</h4>
+        <b>Sidra:</b> {row['Marca']}<br>
+        <small>Registrado el: {fecha}</small><br>
+        <p style='margin-top:5px;'><i>{row['Observaciones']}</i></p>
     </div>
     """
     folium.Marker(
         [row['LAT'], row['LON']],
-        popup=folium.Popup(popup_text, max_width=200),
+        popup=folium.Popup(popup_text, max_width=250),
         tooltip=row['Nombre'],
         icon=obtener_icono(row.get('Formato', 'Vaso'))
     ).add_to(m)
 
-# 6. CAPTURA DE CLIC Y FORMULARIO
-if 'nombre_sugerido' not in st.session_state:
-    st.session_state.nombre_sugerido = ""
+# 6. LÓGICA DE CLIC Y FORMULARIO
+if 'nombre_detectado' not in st.session_state:
+    st.session_state.nombre_detectado = ""
 
-mapa_render = st_folium(m, width="100%", height=500)
+mapa_clic = st_folium(m, width="100%", height=500)
 
-lat_clic, lon_clic = None, None
-if mapa_render and mapa_render["last_clicked"]:
-    lat_clic = mapa_render["last_clicked"]["lat"]
-    lon_clic = mapa_render["last_clicked"]["lng"]
-    # Intentamos adivinar el nombre
-    with st.spinner('Adivinando nombre del sitio...'):
-        st.session_state.nombre_sugerido = obtener_nombre_punto(lat_clic, lon_clic)
+lat_c, lon_c = None, None
+if mapa_clic and mapa_clic["last_clicked"]:
+    lat_c = mapa_clic["last_clicked"]["lat"]
+    lon_c = mapa_clic["last_clicked"]["lng"]
+    # Llamamos a la función para autocompletar el nombre
+    with st.spinner('Identificando local...'):
+        st.session_state.nombre_detectado = obtener_nombre_google(lat_c, lon_c)
 
 st.divider()
-with st.form("nuevo_registro", clear_on_submit=True):
-    st.subheader("➕ Añadir Parada")
+with st.form("registro_rapido", clear_on_submit=True):
+    st.subheader("➕ Nueva Parada")
     col1, col2 = st.columns(2)
     with col1:
-        # Aquí aparece el nombre automático si hemos pinchado en el mapa
-        nombre_final = st.text_input("Nombre del Bar/Calle", value=st.session_state.nombre_sugerido)
-        marca_sidra = st.text_input("Marca de Sidra")
+        # El nombre se autocompleta aquí
+        nombre_input = st.text_input("Nombre del Bar / Dirección", value=st.session_state.nombre_detectado)
+        marca_input = st.text_input("Marca de Sidra")
     with col2:
-        formato_sidra = st.radio("¿Cómo se sirve?", ["Se puede pedir por Vasos (Pote)", "Solo venden la Botella entera"])
+        formato_input = st.radio("¿Cómo se sirve?", ["Se puede pedir por Vasos (Pote)", "Solo venden la Botella entera"])
     
-    notas = st.text_area("Observaciones")
+    obs_input = st.text_area("Observaciones")
     
-    if st.form_submit_button("Guardar"):
-        if nombre_final and lat_clic:
+    if st.form_submit_button("Guardar Parada"):
+        if nombre_input and lat_c:
             nueva_fila = pd.DataFrame([{
-                "Nombre": nombre_final, "LAT": lat_clic, "LON": lon_clic,
-                "Marca": marca_sidra, "Formato": formato_sidra,
+                "Nombre": nombre_input, "LAT": lat_c, "LON": lon_c,
+                "Marca": marca_input, "Formato": formato_input,
                 "Fecha_registro": datetime.now().strftime("%d/%m/%Y"),
-                "Observaciones": notas
+                "Observaciones": obs_input
             }])
             df_final = pd.concat([df_raw, nueva_fila], ignore_index=True)
             conn.update(data=df_final)
-            st.session_state.nombre_sugerido = "" # Limpiar
-            st.success("¡Guardado!")
+            st.session_state.nombre_detectado = ""
+            st.success("¡Guardado con éxito!")
             st.rerun()
 
-# 7. TABLA CON FECHAS
-st.write("### Historial de la Ruta")
+# 7. TABLA DE HISTORIAL
+st.write("### 📜 Historial de Registros")
 st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato', 'Fecha_registro', 'Observaciones']], use_container_width=True)
