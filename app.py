@@ -5,24 +5,38 @@ from datetime import datetime
 import folium
 from streamlit_folium import st_folium
 
-# 1. CONFIGURACIÓN Y ESTILO SIDRERO
+# 1. CONFIGURACIÓN E INTERFAZ
 st.set_page_config(page_title="Ruta Sidrera", layout="wide", page_icon="🍎")
 
+# CSS para fijar la chincheta en el centro del mapa y estilo de botones
 st.markdown("""
     <style>
-    /* Estilo para los botones principales */
+    /* Estilo del contenedor del mapa para posicionar la chincheta encima */
+    .map-container {
+        position: relative;
+        width: 100%;
+    }
+    .chincheta-centro {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -100%);
+        z-index: 1000;
+        pointer-events: none; /* Para que no interfiera con el toque del mapa */
+        font-size: 40px;
+    }
     div.stButton > button {
         background-color: #2e7d32; color: white; border-radius: 10px;
-        height: 3em; width: 100%; font-weight: bold; border: none;
+        height: 3.5em; width: 100%; font-weight: bold; border: none;
     }
-    /* Estilo específico para Seleccionar Bar */
     .stButton button[kind="primary"] {
         background-color: #d35400 !important;
+        font-size: 1.2em;
     }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. CARGA DE DATOS
+# 2. DATOS
 conn = st.connection("gsheets", type=GSheetsConnection)
 df_raw = conn.read(ttl="0")
 df_mapa = df_raw.copy()
@@ -30,16 +44,14 @@ df_mapa['LAT'] = pd.to_numeric(df_mapa['LAT'].astype(str).str.replace(',', '.'),
 df_mapa['LON'] = pd.to_numeric(df_mapa['LON'].astype(str).str.replace(',', '.'), errors='coerce')
 df_mapa = df_mapa.dropna(subset=['LAT', 'LON'])
 
-# 3. CONTROL DE NAVEGACIÓN
+# 3. NAVEGACIÓN
 if 'temp_coords' not in st.session_state:
     st.session_state.temp_coords = None
-if 'nombre_sugerido' not in st.session_state:
-    st.session_state.nombre_sugerido = ""
 
 menu = st.radio("Navegación", ["🗺️ Mapa", "📜 Listado", "➕ Añadir Nuevo"], 
                 horizontal=True, label_visibility="collapsed")
 
-# --- LÓGICA DE PANTALLAS ---
+# --- PANTALLAS ---
 
 if menu == "🗺️ Mapa":
     st.subheader("Bares Registrados")
@@ -57,52 +69,47 @@ if menu == "🗺️ Mapa":
     st_folium(m, width="100%", height=500, key="mapa_ver")
 
 elif menu == "📜 Listado":
-    st.subheader("Bares en la zona")
+    st.subheader("Listado de Bares")
     st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato', 'Fecha_registro']], 
                  use_container_width=True, hide_index=True)
 
 elif menu == "➕ Añadir Nuevo":
     if st.session_state.temp_coords is None:
-        st.subheader("Paso 1: Posiciona el punto de mira")
+        st.subheader("Mueve el mapa para situar la chincheta")
         
-        # Mapa de selección con punto de mira central
+        # Contenedor con la chincheta visual
+        st.markdown('<div class="map-container">', unsafe_allow_html=True)
+        # Este es el icono de la chincheta que se verá en el centro
+        st.markdown('<div class="chincheta-centro">📍</div>', unsafe_allow_html=True)
+        
         m_sel = folium.Map(location=[43.2960, -2.9975], zoom_start=19, tiles=None)
         folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                          attr='Google', name='Satélite').add_to(m_sel)
         
-        # Añadimos un marcador estético que simula el punto de mira
-        # En Streamlit-folium, el centro del mapa se captura al moverlo
-        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_punto_mira")
-        
-        st.info("Mueve el mapa hasta que el bar quede en el centro. Al moverlo, verás las coordenadas abajo.")
-        
-        col_sel1, col_sel2 = st.columns([2, 1])
+        # Capturamos el movimiento del mapa
+        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_chincheta")
+        st.markdown('</div>', unsafe_allow_html=True)
         
         if salida_sel and salida_sel.get("center"):
-            centro_lat = salida_sel["center"]["lat"]
-            centro_lon = salida_sel["center"]["lng"]
+            c_lat = salida_sel["center"]["lat"]
+            c_lng = salida_sel["center"]["lng"]
             
-            with col_sel1:
-                st.write(f"📍 Centro actual: `{centro_lat:.5f}, {centro_lon:.5f}`")
+            st.write(f"Coordenadas actuales: `{c_lat:.5f}, {c_lng:.5f}`")
             
-            with col_sel2:
-                if st.button("🎯 Seleccionar Bar", type="primary"):
-                    st.session_state.temp_coords = (centro_lat, centro_lon)
-                    # Aquí es donde intentaríamos sacar el nombre de Google si tuviéramos API Key, 
-                    # de momento lo dejamos listo para el formulario.
-                    st.rerun()
-
+            if st.button("🎯 Seleccionar Bar", type="primary"):
+                st.session_state.temp_coords = (c_lat, c_lng)
+                st.rerun()
     else:
-        # PANTALLA DE FORMULARIO
-        st.subheader("Paso 2: Completar datos")
+        # FORMULARIO EN PANTALLA NUEVA
+        st.subheader("📝 Datos del Nuevo Bar")
         with st.form("registro_final"):
-            nombre = st.text_input("Nombre del Bar", value=st.session_state.nombre_sugerido)
+            nombre = st.text_input("Nombre del Bar (si Google no lo da, escríbelo)")
             marca = st.text_input("Marca de Sidra")
-            formato = st.radio("¿Qué tienen?", ["Vaso (Pote)", "Botella entera"])
-            obs = st.text_area("Notas")
+            formato = st.radio("¿Cómo la sirven?", ["Vaso (Pote)", "Solo Botella entera"])
+            obs = st.text_area("Observaciones")
             
-            c1, c2 = st.columns(2)
-            if c1.form_submit_button("✅ Registrar Bar"):
+            col_b1, col_b2 = st.columns(2)
+            if col_b1.form_submit_button("✅ Registrar Bar"):
                 if nombre:
                     nueva_fila = pd.DataFrame([{
                         "Nombre": nombre,
@@ -116,9 +123,9 @@ elif menu == "➕ Añadir Nuevo":
                     conn.update(data=df_final)
                     st.session_state.temp_coords = None
                     st.balloons()
-                    st.success("¡Guardado! Volviendo al inicio...")
+                    st.success("¡Registrado!")
                     st.rerun()
             
-            if c2.form_submit_button("❌ Cancelar"):
+            if col_b2.form_submit_button("❌ Cancelar"):
                 st.session_state.temp_coords = None
                 st.rerun()
