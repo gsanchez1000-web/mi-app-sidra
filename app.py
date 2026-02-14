@@ -5,82 +5,77 @@ from datetime import datetime
 import folium
 from streamlit_folium import st_folium
 
-st.set_page_config(page_title="Ruta Sidrera", layout="wide")
-st.title("🍎 Nuestra Ruta de la Sidra")
+# Configuración de la página
+st.set_page_config(page_title="Ruta Sidrera Barakaldo", layout="wide", page_icon="🍎")
 
-# Conexión con Google Sheets
+st.title("🍎 Nuestra Ruta de la Sidra")
+st.markdown("Mantén pulsado o haz clic en el mapa para marcar la ubicación de un nuevo bar.")
+
+# 1. CONEXIÓN CON GOOGLE SHEETS
 conn = st.connection("gsheets", type=GSheetsConnection)
 df = conn.read(ttl="0")
 
-# --- MAPA INTERACTIVO (GOOGLE SATELLITE) ---
-st.subheader("📍 Toca el mapa para situar un bar o mira los existentes")
+# Limpieza de datos: aseguramos que LAT y LON sean números y quitamos filas vacías para el mapa
+df['LAT'] = pd.to_numeric(df['LAT'], errors='coerce')
+df['LON'] = pd.to_numeric(df['LON'], errors='coerce')
+df_mapa = df.dropna(subset=['LAT', 'LON'])
 
-# Coordenadas de Barakaldo
-centro = [43.2974, -2.9865]
-m = folium.Map(location=centro, zoom_start=17)
+# 2. CONFIGURACIÓN DEL MAPA (GOOGLE SATELLITE)
+# Centro inicial en Barakaldo
+centro_barakaldo = [43.2974, -2.9865]
 
-# Añadimos la capa de Google Satélite Híbrido (más actualizado)
-google_satellite = folium.TileLayer(
+# Creamos el mapa sin capas por defecto (tiles=None)
+m = folium.Map(location=centro_barakaldo, zoom_start=17, tiles=None)
+
+# Añadimos la capa de Google Satélite Híbrido con zoom máximo aumentado (20)
+folium.TileLayer(
     tiles = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    attr = 'Google',
+    attr = 'Google Maps Satellite',
     name = 'Google Satellite',
+    max_zoom = 20,
     overlay = False,
-    control = True
+    control = False
 ).add_to(m)
 
-# Lógica de Iconos Personalizados
-def obtener_icono(formato):
-    # Usamos iconos de FontAwesome que se parecen a lo que buscas
-    if "Botella" in formato and "Vaso" not in formato:
+# 3. LÓGICA DE ICONOS PERSONALIZADOS
+def obtener_icono(formato_texto):
+    formato_texto = str(formato_texto)
+    if "Botella" in formato_texto and "Vaso" not in formato_texto:
+        # Icono de botella (color verde)
         return folium.Icon(color="green", icon="wine-bottle", prefix="fa")
     else:
-        # Por defecto el vaso (vidrio/glass)
+        # Icono de vaso (color naranja)
         return folium.Icon(color="orange", icon="glass-half-full", prefix="fa")
 
-# Dibujar puntos existentes
-if not df.empty:
-    for i, row in df.iterrows():
-        if pd.notnull(row['LAT']) and pd.notnull(row['LON']):
-            folium.Marker(
-                [row['LAT'], row['LON']],
-                popup=f"<b>{row['Nombre']}</b><br>Sidra: {row['Marca']}",
-                tooltip=row['Nombre'],
-                icon=obtener_icono(row['Formato'])
-            ).add_to(m)
+# 4. DIBUJAR LOS BARES EXISTENTES
+for i, row in df_mapa.iterrows():
+    popup_info = f"""
+    <b>{row['Nombre']}</b><br>
+    <b>Sidra:</b> {row['Marca']}<br>
+    <b>Formato:</b> {row['Formato']}<br>
+    <i>{row['Observaciones']}</i>
+    """
+    folium.Marker(
+        [row['LAT'], row['LON']],
+        popup=folium.Popup(popup_info, max_width=250),
+        tooltip=row['Nombre'],
+        icon=obtener_icono(row.get('Formato', 'Vaso'))
+    ).add_to(m)
 
-salida_mapa = st_folium(m, width="100%", height=500)
+# 5. MOSTRAR MAPA Y CAPTURAR CLIC
+salida_mapa = st_folium(m, width="100%", height=550)
 
-lat_sel, lon_sel = None, None
+lat_seleccionada = None
+lon_seleccionada = None
+
 if salida_mapa and salida_mapa["last_clicked"]:
-    lat_sel = salida_mapa["last_clicked"]["lat"]
-    lon_sel = salida_mapa["last_clicked"]["lng"]
-    st.success(f"📍 Punto marcado. Ahora rellena los datos de abajo.")
+    lat_seleccionada = salida_mapa["last_clicked"]["lat"]
+    lon_seleccionada = salida_mapa["last_clicked"]["lng"]
+    st.success(f"📍 Ubicación capturada: {lat_seleccionada:.5f}, {lon_seleccionada:.5f}")
 
-# --- FORMULARIO SIMPLIFICADO ---
+# 6. FORMULARIO PARA AÑADIR NUEVOS BARES
 st.divider()
-with st.form("nuevo_bar"):
-    nombre = st.text_input("Nombre del Bar")
-    marca = st.text_input("Marca de Sidra")
+with st.form("nuevo_bar", clear_on_submit=True):
+    st.subheader("➕ Registrar nueva parada")
     
-    # Nueva lógica de formato según tu idea
-    formato = st.radio("¿Cómo se sirve aquí?", 
-                       ["Se puede pedir por Vasos (Pote)", "Solo venden la Botella entera"])
-    
-    observaciones = st.text_area("Observaciones")
-    
-    if st.form_submit_button("Guardar en la Ruta"):
-        if nombre and lat_sel:
-            nueva_fila = pd.DataFrame([{
-                "Nombre": nombre, "LAT": lat_sel, "LON": lon_sel, 
-                "Marca": marca, "Formato": formato,
-                "Fecha_registro": datetime.now().strftime("%d/%m/%Y"),
-                "Observaciones": observaciones
-            }])
-            df_act = pd.concat([df, nueva_fila], ignore_index=True)
-            conn.update(data=df_act)
-            st.success(f"✅ {nombre} añadido a la ruta.")
-            st.rerun()
-        else:
-            st.error("Asegúrate de haber marcado el punto en el mapa y puesto el nombre.")
-
-st.dataframe(df, use_container_width=True)
+    col_a, col_b = st.columns(2)
