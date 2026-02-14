@@ -15,49 +15,42 @@ st.markdown("Haz clic en el mapa para situar un nuevo bar y completa los datos a
 conn = st.connection("gsheets", type=GSheetsConnection)
 df_raw = conn.read(ttl="0")
 
-# Limpieza profunda de coordenadas para evitar el ValueError
+# Limpieza de coordenadas
 df = df_raw.copy()
 df['LAT'] = pd.to_numeric(df['LAT'].astype(str).str.replace(',', '.'), errors='coerce')
 df['LON'] = pd.to_numeric(df['LON'].astype(str).str.replace(',', '.'), errors='coerce')
 df_mapa = df.dropna(subset=['LAT', 'LON'])
 
-# 2. CONFIGURACIÓN DEL MAPA (GOOGLE SATELLITE)
+# 2. CONFIGURACIÓN DEL MAPA
 centro_barakaldo = [43.2960, -2.9975]
 m = folium.Map(location=centro_barakaldo, zoom_start=17, tiles=None)
 
-# Capa Satélite Google de alta resolución
+# Satélite Google
 folium.TileLayer(
     tiles = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    attr = 'Google Maps Satellite',
+    attr = 'Google Maps',
     name = 'Google Satellite',
     max_zoom = 20,
     overlay = False,
     control = False
 ).add_to(m)
 
-# 3. LÓGICA DE ICONOS (VASO Y BOTELLA DIBUJADOS EN BLANCO)
+# 3. LÓGICA DE ICONOS (ESTÁNDAR Y FIABLES)
 def obtener_icono(formato_texto):
     formato_texto = str(formato_texto)
-    # SI ES SOLO BOTELLA: Fondo Verde, Icono Blanco
+    # SI ES SOLO BOTELLA: Fondo Verde, Icono Gota blanca (tint)
     if "Botella" in formato_texto and "Vasos" not in formato_texto:
-        return folium.Icon(color="green", icon="wine-bottle", prefix="fa", icon_color="white")
-    # SI ES POTE/VASO: Fondo Azul, Icono Blanco
+        return folium.Icon(color="green", icon="tint", prefix="glyphicon", icon_color="white")
+    # SI ES POTE/VASO: Fondo Azul, Icono Vaso blanco (glass)
     else:
-        return folium.Icon(color="blue", icon="glass-half-full", prefix="fa", icon_color="white")
+        return folium.Icon(color="blue", icon="glass", prefix="glyphicon", icon_color="white")
 
-# 4. DIBUJAR LOS BARES EXISTENTES
+# 4. DIBUJAR LOS BARES
 for i, row in df_mapa.iterrows():
-    popup_html = f"""
-    <div style='font-family: sans-serif; min-width: 150px;'>
-        <h4 style='margin:0; color: #d35400;'>{row['Nombre']}</h4>
-        <p style='margin:5px 0;'><b>Sidra:</b> {row['Marca']}<br>
-        <b>Formato:</b> {row['Formato']}</p>
-        <i style='color: #666;'>{row['Observaciones']}</i>
-    </div>
-    """
+    popup_html = f"<b>{row['Nombre']}</b><br>Sidra: {row['Marca']}"
     folium.Marker(
         [row['LAT'], row['LON']],
-        popup=folium.Popup(popup_html, max_width=300),
+        popup=folium.Popup(popup_html, max_width=200),
         tooltip=row['Nombre'],
         icon=obtener_icono(row.get('Formato', 'Vaso'))
     ).add_to(m)
@@ -65,41 +58,31 @@ for i, row in df_mapa.iterrows():
 # 5. MOSTRAR MAPA Y CAPTURAR CLIC
 salida_mapa = st_folium(m, width="100%", height=550)
 
-lat_seleccionada = None
-lon_seleccionada = None
-
+lat_sel, lon_sel = None, None
 if salida_mapa and salida_mapa["last_clicked"]:
-    lat_seleccionada = salida_mapa["last_clicked"]["lat"]
-    lon_seleccionada = salida_mapa["last_clicked"]["lng"]
-    st.success(f"📍 Ubicación marcada. Ahora rellena el formulario abajo.")
+    lat_sel = salida_mapa["last_clicked"]["lat"]
+    lon_sel = salida_mapa["last_clicked"]["lng"]
+    st.success(f"📍 Ubicación marcada correctamente.")
 
 # 6. FORMULARIO
 st.divider()
 with st.form("nuevo_bar", clear_on_submit=True):
-    st.subheader("➕ Añadir Bar a la Ruta")
+    st.subheader("➕ Añadir Bar")
     c1, c2 = st.columns(2)
     with c1:
         nombre = st.text_input("Nombre del Bar")
-        marca = st.text_input("Marca de Sidra")
+        marca = st.text_input("Sidra")
     with c2:
-        formato = st.radio("¿Qué sirven?", ["Se puede pedir por Vasos (Pote)", "Solo venden la Botella entera"])
+        formato = st.radio("¿Qué tienen?", ["Se puede pedir por Vasos (Pote)", "Solo venden la Botella entera"])
     
-    obs = st.text_area("Observaciones")
-    
-    if st.form_submit_button("Guardar en el Excel"):
-        if nombre and lat_seleccionada:
+    if st.form_submit_button("Guardar"):
+        if nombre and lat_sel:
             nueva_fila = pd.DataFrame([{
-                "Nombre": nombre, "LAT": float(lat_seleccionada), "LON": float(lon_seleccionada),
-                "Marca": marca, "Formato": formato, "Fecha_registro": datetime.now().strftime("%d/%m/%Y"),
-                "Observaciones": obs
+                "Nombre": nombre, "LAT": float(lat_sel), "LON": float(lon_sel),
+                "Marca": marca, "Formato": formato, "Fecha_registro": datetime.now().strftime("%d/%m/%Y")
             }])
             df_act = pd.concat([df_raw, nueva_fila], ignore_index=True)
             conn.update(data=df_act)
-            st.balloons()
             st.rerun()
-        else:
-            st.warning("⚠️ Selecciona el punto en el mapa y escribe el nombre.")
 
-# 7. TABLA
-with st.expander("Ver tabla completa"):
-    st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato', 'Observaciones']], use_container_width=True)
+st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato']])
