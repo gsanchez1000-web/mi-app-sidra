@@ -6,11 +6,11 @@ import folium
 from streamlit_folium import st_folium
 from geopy.geocoders import Nominatim
 
-# Configuración inicial
+# Configuración de página
 st.set_page_config(page_title="Ruta Sidrera Barakaldo", layout="wide", page_icon="🍎")
 st.title("🍎 Nuestra Ruta de la Sidra")
 
-# 1. CONEXIÓN A GOOGLE SHEETS
+# 1. CONEXIÓN A DATOS
 conn = st.connection("gsheets", type=GSheetsConnection)
 df_raw = conn.read(ttl="0")
 
@@ -19,18 +19,19 @@ df['LAT'] = pd.to_numeric(df['LAT'].astype(str).str.replace(',', '.'), errors='c
 df['LON'] = pd.to_numeric(df['LON'].astype(str).str.replace(',', '.'), errors='coerce')
 df_mapa = df.dropna(subset=['LAT', 'LON'])
 
-# 2. FUNCIÓN PARA ADIVINAR EL NOMBRE (Con "escudo" para evitar errores)
+# 2. FUNCIÓN PARA ADIVINAR NOMBRE (AUTOCOMPLETADO)
 def obtener_nombre_google(lat, lon):
     try:
-        geolocator = Nominatim(user_agent="sidra_app_v2")
+        # Usamos un agente único para evitar bloqueos
+        geolocator = Nominatim(user_agent="sidra_app_barakaldo_v3")
         location = geolocator.reverse((lat, lon), timeout=3)
         if location:
             address = location.raw.get('address', {})
-            # Buscamos el nombre del local o la calle
+            # Intentamos: Nombre negocio > Calle y número
             return address.get('amenity') or address.get('shop') or f"{address.get('road', '')} {address.get('house_number', '')}".strip()
     except:
-        return ""
-    return ""
+        return "Nuevo Bar"
+    return "Nuevo Bar"
 
 # 3. ICONOS (VASO SIDRA VS BOTELLA)
 def obtener_icono(formato_texto):
@@ -38,7 +39,7 @@ def obtener_icono(formato_texto):
     if "Botella" in formato_texto and "Vasos" not in formato_texto:
         return folium.Icon(color="green", icon="wine-bottle", prefix="fa", icon_color="white")
     else:
-        # Icono de vaso ancho y limpio
+        # Usamos 'glass-whiskey': es un vaso ancho, sólido y sin dibujos raros
         return folium.Icon(color="blue", icon="glass-whiskey", prefix="fa", icon_color="white")
 
 # 4. MAPA SATÉLITE
@@ -51,15 +52,15 @@ folium.TileLayer(
     control = False
 ).add_to(m)
 
-# 5. DIBUJAR MARCADORES EXISTENTES (Con Fecha)
+# 5. DIBUJAR MARCADORES EXISTENTES (CON FECHA)
 for i, row in df_mapa.iterrows():
-    fecha = row.get('Fecha_registro', '---')
+    fecha_reg = row.get('Fecha_registro', '---')
     popup_text = f"""
     <div style='font-family: sans-serif; min-width: 140px;'>
         <h4 style='margin:0; color:#d35400;'>{row['Nombre']}</h4>
         <b>Sidra:</b> {row['Marca']}<br>
-        <small>Registrado el: {fecha}</small><br>
-        <p style='margin-top:5px;'><i>{row['Observaciones']}</i></p>
+        <small style='color:gray;'>Registrado el: {fecha_reg}</small>
+        <p style='margin-top:5px; border-top:1px solid #eee; padding-top:5px;'><i>{row['Observaciones']}</i></p>
     </div>
     """
     folium.Marker(
@@ -69,9 +70,9 @@ for i, row in df_mapa.iterrows():
         icon=obtener_icono(row.get('Formato', 'Vaso'))
     ).add_to(m)
 
-# 6. LÓGICA DE CLIC Y FORMULARIO
-if 'nombre_detectado' not in st.session_state:
-    st.session_state.nombre_detectado = ""
+# 6. CAPTURA DE CLIC Y FORMULARIO
+if 'nombre_input' not in st.session_state:
+    st.session_state.nombre_input = ""
 
 mapa_clic = st_folium(m, width="100%", height=500)
 
@@ -79,37 +80,36 @@ lat_c, lon_c = None, None
 if mapa_clic and mapa_clic["last_clicked"]:
     lat_c = mapa_clic["last_clicked"]["lat"]
     lon_c = mapa_clic["last_clicked"]["lng"]
-    # Llamamos a la función para autocompletar el nombre
-    with st.spinner('Identificando local...'):
-        st.session_state.nombre_detectado = obtener_nombre_google(lat_c, lon_c)
+    # Rellenamos el nombre automáticamente al pinchar
+    with st.spinner('Adivinando nombre del sitio...'):
+        st.session_state.nombre_input = obtener_nombre_google(lat_c, lon_c)
 
 st.divider()
-with st.form("registro_rapido", clear_on_submit=True):
-    st.subheader("➕ Nueva Parada")
+with st.form("registro", clear_on_submit=True):
+    st.subheader("➕ Añadir bar a la ruta")
     col1, col2 = st.columns(2)
     with col1:
-        # El nombre se autocompleta aquí
-        nombre_input = st.text_input("Nombre del Bar / Dirección", value=st.session_state.nombre_detectado)
-        marca_input = st.text_input("Marca de Sidra")
+        nombre_final = st.text_input("Nombre (se rellena al tocar el mapa)", value=st.session_state.nombre_input)
+        marca_final = st.text_input("Marca de Sidra")
     with col2:
-        formato_input = st.radio("¿Cómo se sirve?", ["Se puede pedir por Vasos (Pote)", "Solo venden la Botella entera"])
+        formato_final = st.radio("¿Qué tienen?", ["Se puede pedir por Vasos (Pote)", "Solo venden la Botella entera"])
     
-    obs_input = st.text_area("Observaciones")
+    obs_final = st.text_area("Observaciones")
     
-    if st.form_submit_button("Guardar Parada"):
-        if nombre_input and lat_c:
+    if st.form_submit_button("Guardar en mi Excel"):
+        if nombre_final and lat_c:
             nueva_fila = pd.DataFrame([{
-                "Nombre": nombre_input, "LAT": lat_c, "LON": lon_c,
-                "Marca": marca_input, "Formato": formato_input,
+                "Nombre": nombre_final, "LAT": lat_c, "LON": lon_c,
+                "Marca": marca_final, "Formato": formato_final,
                 "Fecha_registro": datetime.now().strftime("%d/%m/%Y"),
-                "Observaciones": obs_input
+                "Observaciones": obs_final
             }])
             df_final = pd.concat([df_raw, nueva_fila], ignore_index=True)
             conn.update(data=df_final)
-            st.session_state.nombre_detectado = ""
-            st.success("¡Guardado con éxito!")
+            st.session_state.nombre_input = "" # Limpiar
+            st.success("¡Bar guardado!")
             st.rerun()
 
-# 7. TABLA DE HISTORIAL
-st.write("### 📜 Historial de Registros")
+# 7. TABLA DE HISTORIAL CON FECHAS
+st.write("### 📜 Listado de Bares")
 st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato', 'Fecha_registro', 'Observaciones']], use_container_width=True)
