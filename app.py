@@ -9,15 +9,14 @@ from streamlit_folium import st_folium
 st.set_page_config(page_title="Ruta Sidrera", layout="wide", page_icon="🍎")
 
 # --- MEMORIA DE LA APP (Session State) ---
-# Coordenadas por defecto (Barakaldo)
 CENTER_START = [43.2960, -2.9975]
 
 if 'map_center' not in st.session_state:
     st.session_state.map_center = CENTER_START
 if 'temp_coords' not in st.session_state:
     st.session_state.temp_coords = None
-if 'menu_option' not in st.session_state:
-    st.session_state.menu_option = "🗺️ Ver Mapa"
+if 'last_menu' not in st.session_state:
+    st.session_state.last_menu = "🗺️ Ver Mapa"
 
 # CONEXIÓN
 try:
@@ -35,19 +34,20 @@ if not df_mapa.empty:
     df_mapa['LON'] = pd.to_numeric(df_mapa['LON'].astype(str).str.replace(',', '.'), errors='coerce')
     df_mapa = df_mapa.dropna(subset=['LAT', 'LON'])
 
-# CONTROL DE MENÚ (Usamos session_state para poder saltar de pestaña por código)
+# --- LÓGICA DE NAVEGACIÓN ---
 menu = st.radio("Menú", ["🗺️ Ver Mapa", "➕ Añadir Nuevo"], 
                 horizontal=True, 
-                label_visibility="collapsed",
-                key="menu_radio",
-                index=0 if st.session_state.menu_option == "🗺️ Ver Mapa" else 1)
+                label_visibility="collapsed")
+
+# Si el usuario cambia manualmente a "Añadir Nuevo", reseteamos las coordenadas temporales
+if menu == "➕ Añadir Nuevo" and st.session_state.last_menu != "➕ Añadir Nuevo":
+    st.session_state.temp_coords = None
+st.session_state.last_menu = menu
 
 # --- PANTALLAS ---
 
 if menu == "🗺️ Ver Mapa":
     st.subheader("Mapa de Bares")
-    
-    # El mapa ahora se centra donde diga st.session_state.map_center
     m = folium.Map(location=st.session_state.map_center, zoom_start=18, tiles=None)
     folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                      attr='Google', name='Satélite').add_to(m)
@@ -58,56 +58,62 @@ if menu == "🗺️ Ver Mapa":
             popup=f"<b>{row['Nombre']}</b><br>Sidra: {row.get('Marca', 'S/D')}", 
             icon=folium.Icon(color="green", icon="glass-whiskey", prefix="fa")
         ).add_to(m)
-    st_folium(m, width="100%", height=550, key="mapa_v1")
+    st_folium(m, width="100%", height=550, key="mapa_v_visual")
 
 elif menu == "➕ Añadir Nuevo":
     if st.session_state.temp_coords is None:
-        st.info("📍 Paso 1: Haz clic en el mapa para situar el nuevo bar.")
-        m_sel = folium.Map(location=CENTER_START, zoom_start=19, tiles=None)
+        st.info("📍 **Paso 1:** Haz clic en el mapa exactamente donde está el bar.")
+        # Usamos el centro actual para que no se pierda si estamos navegando
+        m_sel = folium.Map(location=st.session_state.map_center, zoom_start=19, tiles=None)
         folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                          attr='Google', name='Satélite').add_to(m_sel)
-        click = st_folium(m_sel, width="100%", height=500, key="mapa_v2")
+        
+        click = st_folium(m_sel, width="100%", height=500, key="mapa_v_registro")
+        
         if click and click.get("last_clicked"):
             st.session_state.temp_coords = (click["last_clicked"]["lat"], click["last_clicked"]["lng"])
             st.rerun()
     else:
         st.subheader("📝 Paso 2: Datos del bar")
-        with st.form("registro"):
+        st.write(f"Coordenadas seleccionadas: `{st.session_state.temp_coords}`")
+        
+        with st.form("registro_form"):
             nombre = st.text_input("Nombre del Bar")
             marca = st.text_input("Marca de sidra")
             
-            if st.form_submit_button("✅ Guardar Bar", type="primary"):
+            col1, col2 = st.columns(2)
+            
+            if col1.form_submit_button("✅ Guardar y ver en mapa", type="primary"):
                 if nombre:
                     try:
-                        # Guardamos las coordenadas para el mapa antes de limpiar el estado
-                        lat_nuevo = float(st.session_state.temp_coords[0])
-                        lon_nuevo = float(st.session_state.temp_coords[1])
+                        lat_n = float(st.session_state.temp_coords[0])
+                        lon_n = float(st.session_state.temp_coords[1])
                         
-                        nueva = pd.DataFrame([{
+                        nueva_fila = pd.DataFrame([{
                             "Nombre": str(nombre), 
-                            "LAT": lat_nuevo, 
-                            "LON": lon_nuevo, 
+                            "LAT": lat_n, 
+                            "LON": lon_n, 
                             "Marca": str(marca),
                             "Fecha_registro": datetime.now().strftime("%d/%m/%Y")
                         }])
                         
-                        df_final = pd.concat([df_raw, nueva], ignore_index=True)
+                        df_final = pd.concat([df_raw, nueva_fila], ignore_index=True)
                         conn.update(worksheet=NOMBRE_HOJA, data=df_final)
                         
-                        # --- LA MAGIA ESTÁ AQUÍ ---
-                        st.session_state.map_center = [lat_nuevo, lon_nuevo] # Centrar mapa en el nuevo bar
-                        st.session_state.menu_option = "🗺️ Ver Mapa"         # Cambiar pestaña
-                        st.session_state.temp_coords = None                 # Limpiar selección
+                        # Actualizamos estado para la redirección
+                        st.session_state.map_center = [lat_n, lon_n]
+                        st.session_state.temp_coords = None
+                        # Forzamos que la próxima carga sea en el mapa
+                        st.session_state.last_menu = "🗺️ Ver Mapa" 
                         
                         st.balloons()
+                        # Nota: st.rerun() nos llevará al estado inicial del radio (índice 0)
                         st.rerun()
                     except Exception as e:
-                        st.error("Error al guardar.")
-                        st.write(e)
+                        st.error(f"Error al guardar: {e}")
                 else:
                     st.error("El nombre es obligatorio")
             
-            if st.form_submit_button("❌ Cancelar"):
+            if col2.form_submit_button("❌ Cancelar"):
                 st.session_state.temp_coords = None
-                st.session_state.menu_option = "🗺️ Ver Mapa"
                 st.rerun()
