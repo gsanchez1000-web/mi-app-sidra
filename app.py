@@ -5,42 +5,24 @@ from datetime import datetime
 import folium
 from streamlit_folium import st_folium
 
-# 1. CONFIGURACIÓN E INTERFAZ
+# 1. CONFIGURACIÓN
 st.set_page_config(page_title="Ruta Sidrera", layout="wide", page_icon="🍎")
 
-# CSS para fijar la chincheta exactamente en el centro del visor del mapa
+# Estilo de botones (Mantenemos el estilo limpio)
 st.markdown("""
     <style>
-    .map-wrapper {
-        position: relative;
-        width: 100%;
-        height: 450px;
-        margin-top: 10px;
-    }
-    .floating-pin {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        /* El secreto: -50% horizontal y -100% vertical para que la PUNTA sea el centro */
-        transform: translate(-50%, -100%); 
-        z-index: 9999;
-        pointer-events: none;
-        font-size: 50px;
-        filter: drop-shadow(2px 4px 3px rgba(0,0,0,0.5));
-    }
     div.stButton > button {
         background-color: #2e7d32; color: white; border-radius: 12px;
         height: 3.5em; width: 100%; font-weight: bold; border: none;
     }
     .stButton button[kind="primary"] {
         background-color: #d35400 !important;
-        box-shadow: 0 4px 15px rgba(211, 84, 0, 0.3);
-        margin-top: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.2);
     }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. CARGA DE DATOS
+# 2. DATOS
 conn = st.connection("gsheets", type=GSheetsConnection)
 df_raw = conn.read(ttl="0")
 df_mapa = df_raw.copy()
@@ -52,13 +34,13 @@ df_mapa = df_mapa.dropna(subset=['LAT', 'LON'])
 if 'temp_coords' not in st.session_state:
     st.session_state.temp_coords = None
 
-menu = st.radio("Menú Principal", ["🗺️ Mapa", "📜 Listado", "➕ Añadir Nuevo"], 
+menu = st.radio("Menú", ["🗺️ Mapa", "📜 Listado", "➕ Añadir Nuevo"], 
                 horizontal=True, label_visibility="collapsed")
 
 # --- PANTALLAS ---
 
 if menu == "🗺️ Mapa":
-    st.subheader("Nuestros Bares")
+    st.subheader("Bares Registrados")
     m = folium.Map(location=[43.2960, -2.9975], zoom_start=18, tiles=None)
     folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                      attr='Google', name='Satélite').add_to(m)
@@ -79,40 +61,42 @@ elif menu == "📜 Listado":
 
 elif menu == "➕ Añadir Nuevo":
     if st.session_state.temp_coords is None:
-        st.markdown("#### 📍 Sitúa el bar bajo la chincheta")
+        st.markdown("#### 📍 Paso 1: Sitúa el bar en el centro")
         
-        # Envoltorio visual para que la chincheta no flote en el aire
-        st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
-        st.markdown('<div class="floating-pin">📍</div>', unsafe_allow_html=True)
-        
-        # Mapa centrado en San Vicente
+        # Mapa de selección
+        # IMPORTANTE: No usamos CSS externo, dejamos que folium maneje el centro
         m_sel = folium.Map(location=[43.2960, -2.9975], zoom_start=19, tiles=None)
         folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                          attr='Google', name='Satélite').add_to(m_sel)
         
-        # Captura del centro del mapa en tiempo real
-        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_chincheta_ajustada")
-        st.markdown('</div>', unsafe_allow_html=True)
+        # Mostramos el mapa y capturamos el centro
+        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_centro_fijo")
         
+        # Si el mapa se mueve, obtenemos las coordenadas del centro del visor
         if salida_sel and salida_sel.get("center"):
             c_lat = salida_sel["center"]["lat"]
             c_lng = salida_sel["center"]["lng"]
             
-            # Botón naranja destacado
+            # En lugar de CSS, mostramos las coordenadas para que el usuario sepa que está capturando el centro
+            st.warning(f"🎯 Apuntando a: {c_lat:.5f}, {c_lng:.5f}")
+            
             if st.button("🎯 Seleccionar este Bar", type="primary"):
                 st.session_state.temp_coords = (c_lat, c_lng)
                 st.rerun()
+        else:
+            st.info("Mueve un poco el mapa para activar el selector.")
+
     else:
-        # PANTALLA DE FORMULARIO INDEPENDIENTE
-        st.subheader("📝 Registro del Nuevo Bar")
+        # PANTALLA DE FORMULARIO
+        st.subheader("📝 Paso 2: Datos del Bar")
         with st.form("registro_final"):
             nombre = st.text_input("Nombre del Bar")
             marca = st.text_input("Marca de Sidra")
-            formato = st.radio("¿Cómo se sirve?", ["Vaso (Pote)", "Solo Botella entera"])
-            obs = st.text_area("Notas / Observaciones")
+            formato = st.radio("¿Formato?", ["Vaso (Pote)", "Botella entera"])
+            obs = st.text_area("Notas")
             
-            c_f1, c_f2 = st.columns(2)
-            if c_f1.form_submit_button("✅ Registrar Bar"):
+            c1, c2 = st.columns(2)
+            if c1.form_submit_button("✅ Registrar Bar"):
                 if nombre:
                     nueva_fila = pd.DataFrame([{
                         "Nombre": nombre,
@@ -127,9 +111,6 @@ elif menu == "➕ Añadir Nuevo":
                     st.session_state.temp_coords = None
                     st.balloons()
                     st.rerun()
-                else:
-                    st.error("Por favor, introduce el nombre del bar.")
-            
-            if c_f2.form_submit_button("❌ Cancelar"):
+            if c2.form_submit_button("❌ Cancelar"):
                 st.session_state.temp_coords = None
                 st.rerun()
