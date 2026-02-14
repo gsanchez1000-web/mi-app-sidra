@@ -16,34 +16,35 @@ if 'map_center' not in st.session_state:
 if 'temp_coords' not in st.session_state:
     st.session_state.temp_coords = None
 if 'n_pestaña' not in st.session_state:
-    st.session_state.n_pestaña = 0  # 0 es Mapa, 1 es Añadir
+    st.session_state.n_pestaña = 0 
 
 # CONEXIÓN
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
     NOMBRE_HOJA = "Bares_con_Sidra"
+    # Cargamos datos frescos (ttl=0 para ver los cambios al instante)
     df_raw = conn.read(ttl="0") 
     df_mapa = df_raw.copy()
 except Exception as e:
     st.error("⚠️ Error de conexión.")
     st.stop()
 
-# LIMPIEZA DE COORDENADAS
+# LIMPIEZA DE DATOS PARA EL MAPA
 if not df_mapa.empty:
     df_mapa['LAT'] = pd.to_numeric(df_mapa['LAT'].astype(str).str.replace(',', '.'), errors='coerce')
     df_mapa['LON'] = pd.to_numeric(df_mapa['LON'].astype(str).str.replace(',', '.'), errors='coerce')
     df_mapa = df_mapa.dropna(subset=['LAT', 'LON'])
 
 # --- CONTROL DEL MENÚ ---
-# Usamos index=st.session_state.n_pestaña para forzar la pestaña que queremos
 menu = st.radio("Menú", ["🗺️ Ver Mapa", "➕ Añadir Nuevo"], 
                 horizontal=True, 
                 label_visibility="collapsed",
                 index=st.session_state.n_pestaña)
 
-# Si el usuario cambia el radio manualmente, actualizamos el estado
+# Si el usuario cambia manualmente al mapa, nos aseguramos de limpiar residuos
 if menu == "🗺️ Ver Mapa":
     st.session_state.n_pestaña = 0
+    st.session_state.temp_coords = None 
 else:
     st.session_state.n_pestaña = 1
 
@@ -61,7 +62,9 @@ if menu == "🗺️ Ver Mapa":
             popup=f"<b>{row['Nombre']}</b><br>Sidra: {row.get('Marca', 'S/D')}", 
             icon=folium.Icon(color="green", icon="glass-whiskey", prefix="fa")
         ).add_to(m)
-    st_folium(m, width="100%", height=550, key="mapa_final")
+    
+    # Renderizamos mapa con una clave única para forzar refresco
+    st_folium(m, width="100%", height=550, key="mapa_principal")
 
 elif menu == "➕ Añadir Nuevo":
     if st.session_state.temp_coords is None:
@@ -70,14 +73,15 @@ elif menu == "➕ Añadir Nuevo":
         folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                          attr='Google', name='Satélite').add_to(m_sel)
         
-        click = st_folium(m_sel, width="100%", height=500, key="mapa_registro")
+        # El componente de captura de clic
+        click = st_folium(m_sel, width="100%", height=500, key="captura_clic")
         
         if click and click.get("last_clicked"):
             st.session_state.temp_coords = (click["last_clicked"]["lat"], click["last_clicked"]["lng"])
             st.rerun()
     else:
         st.subheader("📝 Paso 2: Datos del bar")
-        with st.form("registro_form"):
+        with st.form("registro_form", clear_on_submit=True):
             nombre = st.text_input("Nombre del Bar")
             marca = st.text_input("Marca de sidra")
             
@@ -97,15 +101,15 @@ elif menu == "➕ Añadir Nuevo":
                         df_final = pd.concat([df_raw, nueva_fila], ignore_index=True)
                         conn.update(worksheet=NOMBRE_HOJA, data=df_final)
                         
-                        # --- REDIRECCIÓN AL MAPA ---
-                        st.session_state.map_center = [lat_n, lon_n] # Centrar en el nuevo bar
-                        st.session_state.temp_coords = None          # Limpiar clic
-                        st.session_state.n_pestaña = 0               # Forzar pestaña "Ver Mapa"
+                        # ACTUALIZAMOS ESTADO PARA EL SALTO
+                        st.session_state.map_center = [lat_n, lon_n]
+                        st.session_state.temp_coords = None  # ¡Fundamental limpiar aquí!
+                        st.session_state.n_pestaña = 0       # Volver al mapa
                         
                         st.balloons()
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Error al guardar: {e}")
                 else:
                     st.error("El nombre es obligatorio")
             
