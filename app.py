@@ -8,35 +8,37 @@ from streamlit_folium import st_folium
 # 1. CONFIGURACIÓN E INTERFAZ
 st.set_page_config(page_title="Ruta Sidrera", layout="wide", page_icon="🍎")
 
-# CSS para fijar la chincheta en el centro del mapa y estilo de botones
+# CSS para fijar la chincheta exactamente en el centro del visor del mapa
 st.markdown("""
     <style>
-    /* Estilo del contenedor del mapa para posicionar la chincheta encima */
-    .map-container {
+    .map-wrapper {
         position: relative;
         width: 100%;
+        height: 450px;
     }
-    .chincheta-centro {
+    .floating-pin {
         position: absolute;
         top: 50%;
         left: 50%;
-        transform: translate(-50%, -100%);
-        z-index: 1000;
-        pointer-events: none; /* Para que no interfiera con el toque del mapa */
-        font-size: 40px;
+        /* Ajuste fino para que la punta de la chincheta sea el centro exacto */
+        transform: translate(-50%, -100%); 
+        z-index: 9999;
+        pointer-events: none;
+        font-size: 45px;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
     }
     div.stButton > button {
-        background-color: #2e7d32; color: white; border-radius: 10px;
+        background-color: #2e7d32; color: white; border-radius: 12px;
         height: 3.5em; width: 100%; font-weight: bold; border: none;
     }
     .stButton button[kind="primary"] {
         background-color: #d35400 !important;
-        font-size: 1.2em;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. DATOS
+# 2. CARGA DE DATOS
 conn = st.connection("gsheets", type=GSheetsConnection)
 df_raw = conn.read(ttl="0")
 df_mapa = df_raw.copy()
@@ -48,13 +50,13 @@ df_mapa = df_mapa.dropna(subset=['LAT', 'LON'])
 if 'temp_coords' not in st.session_state:
     st.session_state.temp_coords = None
 
-menu = st.radio("Navegación", ["🗺️ Mapa", "📜 Listado", "➕ Añadir Nuevo"], 
+menu = st.radio("Menú Principal", ["🗺️ Mapa", "📜 Listado", "➕ Añadir Nuevo"], 
                 horizontal=True, label_visibility="collapsed")
 
 # --- PANTALLAS ---
 
 if menu == "🗺️ Mapa":
-    st.subheader("Bares Registrados")
+    st.subheader("Nuestros Bares")
     m = folium.Map(location=[43.2960, -2.9975], zoom_start=18, tiles=None)
     folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                      attr='Google', name='Satélite').add_to(m)
@@ -69,47 +71,47 @@ if menu == "🗺️ Mapa":
     st_folium(m, width="100%", height=500, key="mapa_ver")
 
 elif menu == "📜 Listado":
-    st.subheader("Listado de Bares")
+    st.subheader("Resumen de la Ruta")
     st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato', 'Fecha_registro']], 
                  use_container_width=True, hide_index=True)
 
 elif menu == "➕ Añadir Nuevo":
     if st.session_state.temp_coords is None:
-        st.subheader("Mueve el mapa para situar la chincheta")
+        st.markdown("#### 📍 Paso 1: Sitúa el bar bajo la chincheta")
         
-        # Contenedor con la chincheta visual
-        st.markdown('<div class="map-container">', unsafe_allow_html=True)
-        # Este es el icono de la chincheta que se verá en el centro
-        st.markdown('<div class="chincheta-centro">📍</div>', unsafe_allow_html=True)
+        # Envoltorio para la chincheta flotante
+        st.markdown('<div class="map-wrapper">', unsafe_allow_html=True)
+        st.markdown('<div class="floating-pin">📍</div>', unsafe_allow_html=True)
         
         m_sel = folium.Map(location=[43.2960, -2.9975], zoom_start=19, tiles=None)
         folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                          attr='Google', name='Satélite').add_to(m_sel)
         
-        # Capturamos el movimiento del mapa
-        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_chincheta")
+        # Captura del centro del mapa
+        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_chincheta_v2")
         st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.write(" ") # Espaciador
         
         if salida_sel and salida_sel.get("center"):
             c_lat = salida_sel["center"]["lat"]
             c_lng = salida_sel["center"]["lng"]
             
-            st.write(f"Coordenadas actuales: `{c_lat:.5f}, {c_lng:.5f}`")
-            
-            if st.button("🎯 Seleccionar Bar", type="primary"):
+            # Botón de confirmación
+            if st.button("🎯 Seleccionar este Bar", type="primary"):
                 st.session_state.temp_coords = (c_lat, c_lng)
                 st.rerun()
     else:
-        # FORMULARIO EN PANTALLA NUEVA
-        st.subheader("📝 Datos del Nuevo Bar")
+        # PANTALLA DE FORMULARIO LIMPIA
+        st.subheader("📝 Paso 2: Datos del Establecimiento")
         with st.form("registro_final"):
-            nombre = st.text_input("Nombre del Bar (si Google no lo da, escríbelo)")
+            nombre = st.text_input("Nombre del Bar")
             marca = st.text_input("Marca de Sidra")
-            formato = st.radio("¿Cómo la sirven?", ["Vaso (Pote)", "Solo Botella entera"])
-            obs = st.text_area("Observaciones")
+            formato = st.radio("¿Formato de servicio?", ["Vaso (Pote)", "Solo Botella entera"])
+            obs = st.text_area("Notas adicionales")
             
-            col_b1, col_b2 = st.columns(2)
-            if col_b1.form_submit_button("✅ Registrar Bar"):
+            c_f1, c_f2 = st.columns(2)
+            if c_f1.form_submit_button("✅ Registrar Bar"):
                 if nombre:
                     nueva_fila = pd.DataFrame([{
                         "Nombre": nombre,
@@ -123,9 +125,10 @@ elif menu == "➕ Añadir Nuevo":
                     conn.update(data=df_final)
                     st.session_state.temp_coords = None
                     st.balloons()
-                    st.success("¡Registrado!")
                     st.rerun()
+                else:
+                    st.error("El nombre es obligatorio")
             
-            if col_b2.form_submit_button("❌ Cancelar"):
+            if c_f2.form_submit_button("❌ Cancelar"):
                 st.session_state.temp_coords = None
                 st.rerun()
