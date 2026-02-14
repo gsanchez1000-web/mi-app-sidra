@@ -5,77 +5,87 @@ from datetime import datetime
 import folium
 from streamlit_folium import st_folium
 
-# 1. INICIO RÁPIDO
+# 1. CONFIGURACIÓN ULTRA-LIGERA
 st.set_page_config(page_title="Ruta Sidrera", layout="wide")
 st.title("🍎 Ruta Sidrera Barakaldo")
 
-# Conexión optimizada
+# Conexión sin caché para evitar datos corruptos
 conn = st.connection("gsheets", type=GSheetsConnection)
-df_raw = conn.read(ttl="0")
+df_raw = conn.read(ttl=0)
 
-# Limpieza básica
 df = df_raw.copy()
 df['LAT'] = pd.to_numeric(df['LAT'].astype(str).str.replace(',', '.'), errors='coerce')
 df['LON'] = pd.to_numeric(df['LON'].astype(str).str.replace(',', '.'), errors='coerce')
 df_mapa = df.dropna(subset=['LAT', 'LON'])
 
-# 2. MAPA SIMPLIFICADO
-# Usamos un zoom un poco menor al inicio para que cargue más rápido
-m = folium.Map(location=[43.2960, -2.9975], zoom_start=17)
+# 2. MAPA SIMPLIFICADO AL MÁXIMO
+# Centrado en San Vicente
+m = folium.Map(location=[43.2960, -2.9975], zoom_start=17, tiles=None)
 
-# Capa Satélite (sin capas extra para no saturar)
+# Capa Satélite directa (sin controles extra)
 folium.TileLayer(
-    tiles = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    attr = 'Google',
-    name = 'Satellite',
-    overlay = False,
-    control = False
+    tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+    attr='Google',
+    name='Google Satellite',
+    overlay=False,
+    control=False
 ).add_to(m)
 
-# 3. MARCADORES (Iconos estándar para evitar errores de librerías externas)
+# 3. MARCADORES ESTÁNDAR (Para evitar errores de carga de iconos)
 for i, row in df_mapa.iterrows():
-    fecha = row.get('Fecha_registro', '---')
-    # Usamos iconos nativos de folium que no fallan
-    color_icon = "green" if "Botella" in str(row['Formato']) else "blue"
+    # Azul para vaso, Verde para botella
+    color_pinto = "blue"
+    if "Botella" in str(row.get('Formato', '')):
+        color_pinto = "green"
+    
+    fecha_reg = row.get('Fecha_registro', '---')
     
     folium.Marker(
         [row['LAT'], row['LON']],
-        popup=f"<b>{row['Nombre']}</b><br>Sidra: {row['Marca']}<br>Fecha: {fecha}",
-        icon=folium.Icon(color=color_icon, icon="info-sign")
+        popup=f"{row['Nombre']} ({fecha_reg})",
+        icon=folium.Icon(color=color_pinto, icon="info-sign")
     ).add_to(m)
 
-# 4. RENDERIZADO DEL MAPA
-# 'use_container_width=True' ayuda a que no se rompa el diseño
-salida = st_folium(m, height=450, width=800, key="mapa_final")
+# 4. RENDERIZADO CON "SHUTDOWN" DE DATOS INNECESARIOS
+# Limitamos la respuesta del mapa para que no sature la memoria
+salida = st_folium(
+    m, 
+    height=450, 
+    width=700, 
+    returned_objects=["last_clicked"], # SOLO pedimos el clic, nada más
+    key="mapa_estatico"
+)
 
 # 5. FORMULARIO SEPARADO
 st.divider()
-with st.form("nuevo_registro"):
-    st.subheader("➕ Añadir Bar")
+with st.form("registro_limpio", clear_on_submit=True):
+    st.subheader("➕ Añadir nueva parada")
     nombre = st.text_input("Nombre del Bar")
-    marca = st.text_input("Marca")
+    marca = st.text_input("Marca de Sidra")
     formato = st.radio("Formato", ["Vaso (Pote)", "Botella entera"])
-    obs = st.text_area("Notas")
     
-    # Captura de coordenadas solo si se ha hecho clic
-    lat_clic = salida["last_clicked"]["lat"] if salida and salida["last_clicked"] else None
-    lon_clic = salida["last_clicked"]["lng"] if salida and salida["last_clicked"] else None
+    # Solo capturamos si hay un clic real
+    lat_clic = salida["last_clicked"]["lat"] if salida and salida.get("last_clicked") else None
+    lon_clic = salida["last_clicked"]["lng"] if salida and salida.get("last_clicked") else None
     
     if st.form_submit_button("Guardar"):
         if nombre and lat_clic:
             nueva_fila = pd.DataFrame([{
-                "Nombre": nombre, "LAT": lat_clic, "LON": lon_clic,
-                "Marca": marca, "Formato": formato,
+                "Nombre": nombre, 
+                "LAT": lat_clic, 
+                "LON": lon_clic,
+                "Marca": marca, 
+                "Formato": formato,
                 "Fecha_registro": datetime.now().strftime("%d/%m/%Y"),
-                "Observaciones": obs
+                "Observaciones": ""
             }])
-            df_act = pd.concat([df_raw, nueva_fila], ignore_index=True)
-            conn.update(data=df_act)
-            st.success("¡Guardado!")
+            df_final = pd.concat([df_raw, nueva_fila], ignore_index=True)
+            conn.update(data=df_final)
+            st.success("✅ ¡Guardado! Recargando...")
             st.rerun()
         else:
-            st.warning("⚠️ Pulsa en el mapa y pon un nombre.")
+            st.warning("⚠️ Toca el mapa y escribe el nombre.")
 
-# 6. TABLA CON FECHAS
-st.write("### 📜 Historial")
-st.dataframe(df_mapa[['Nombre', 'Marca', 'Formato', 'Fecha_registro']], use_container_width=True)
+# 6. TABLA DE REGISTROS
+st.write("### 📜 Historial con Fechas")
+st.dataframe(df_mapa[['Nombre', 'Marca', 'Fecha_registro']], use_container_width=True)
