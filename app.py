@@ -8,34 +8,44 @@ from streamlit_folium import st_folium
 # 1. CONFIGURACIÓN
 st.set_page_config(page_title="Ruta Sidrera", layout="wide", page_icon="🍎")
 
-# CSS para centrar la chincheta de forma absoluta respecto al mapa
+# CSS "MÁGICO" PARA EL CENTRADO
 st.markdown("""
     <style>
-    .map-container {
+    /* Contenedor principal para centrar el mapa en la página */
+    .st-emotion-cache-1kyx06l { 
+        display: flex; 
+        justify-content: center; 
+    }
+    
+    /* El contenedor que envuelve el mapa y la chincheta */
+    .marco-mapa {
         position: relative;
         width: 100%;
-        max-width: 800px; /* Ajustamos para que en móvil no se desparrame */
-        margin: 0 auto;  /* Centra el contenedor en la pantalla */
+        max-width: 800px; /* Tamaño máximo para que no se estire infinito */
+        height: 450px;
+        margin: 0 auto;
     }
-    .chincheta-fija {
+    
+    /* La chincheta: se posiciona respecto al marco-mapa */
+    .chincheta-perfecta {
         position: absolute;
         top: 50%;
         left: 50%;
-        /* El secreto: -50% en ambos ejes para centro perfecto */
-        /* Luego -100% en Y para que la punta sea la que marque el sitio */
-        transform: translate(-50%, -100%); 
-        z-index: 9999;
+        /* El secreto: -50% para centro absoluto y un poco más en Y para la punta */
+        transform: translate(-50%, -90%);
+        z-index: 1000;
         pointer-events: none;
-        font-size: 55px;
-        filter: drop-shadow(2px 4px 3px rgba(0,0,0,0.4));
+        font-size: 60px;
+        filter: drop-shadow(2px 4px 4px rgba(0,0,0,0.5));
     }
+    
     div.stButton > button {
         background-color: #2e7d32; color: white; border-radius: 12px;
         height: 3.5em; width: 100%; font-weight: bold; border: none;
     }
     .stButton button[kind="primary"] {
         background-color: #d35400 !important;
-        margin-top: 15px;
+        margin-top: 20px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -51,7 +61,7 @@ df_mapa = df_mapa.dropna(subset=['LAT', 'LON'])
 if 'temp_coords' not in st.session_state:
     st.session_state.temp_coords = None
 
-menu = st.radio("Navegación", ["🗺️ Mapa", "📜 Listado", "➕ Añadir Nuevo"], 
+menu = st.radio("Menú", ["🗺️ Mapa", "📜 Listado", "➕ Añadir Nuevo"], 
                 horizontal=True, label_visibility="collapsed")
 
 # --- PANTALLAS ---
@@ -74,15 +84,16 @@ elif menu == "➕ Añadir Nuevo":
     if st.session_state.temp_coords is None:
         st.markdown("#### 📍 Paso 1: Sitúa el bar en el centro")
         
-        # EL CONTENEDOR QUE LO CENTRA TODO
-        st.markdown('<div class="map-container">', unsafe_allow_html=True)
-        st.markdown('<div class="chincheta-fija">📍</div>', unsafe_allow_html=True)
+        # BLOQUE DE MAPA Y CHINCHETA UNIDOS
+        st.markdown('<div class="marco-mapa">', unsafe_allow_html=True)
+        st.markdown('<div class="chincheta-perfecta">📍</div>', unsafe_allow_html=True)
         
         m_sel = folium.Map(location=[43.2960, -2.9975], zoom_start=19, tiles=None)
         folium.TileLayer(tiles='https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', 
                          attr='Google', name='Satélite').add_to(m_sel)
         
-        salida_sel = st_folium(m_sel, width="100%", height=450, key="mapa_alta_final")
+        # El mapa ahora vive dentro del marco
+        salida_sel = st_folium(m_sel, width=800, height=450, key="mapa_final_centrado")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if salida_sel and salida_sel.get("center"):
@@ -92,7 +103,7 @@ elif menu == "➕ Añadir Nuevo":
                 st.session_state.temp_coords = (lat, lng)
                 st.rerun()
     else:
-        # PANTALLA FORMULARIO
+        # PANTALLA FORMULARIO (Se mantiene igual, que funcionaba bien)
         st.subheader("📝 Paso 2: Datos del Bar")
         with st.form("registro"):
             nombre = st.text_input("Nombre del Bar")
